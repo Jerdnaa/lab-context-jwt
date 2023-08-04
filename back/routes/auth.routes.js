@@ -1,41 +1,63 @@
-const router = require('express').Router()
-const jwt = require('jsonwebtoken')
+const router = require("express").Router();
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const User = require("../models/User.model");
+const { isAuthenticated } = require("../middlewares/isAuthenticated");
 
-router.post('/signup', (req, res, next) => {
-  /* Get back the payload from your request, as it's a POST you can access req.body */
+router.get("/", (req, res, next) => {
+  res.json("All good in auth");
+});
 
-  /* Hash the password using bcryptjs */
+/* POST route to signup */
+router.post("/signup", async (req, res) => {
+  const payload = req.body; // { email: 'someEmail', password '1234'}
 
-  /* Record your user to the DB */
+  const salt = bcrypt.genSaltSync(13);
+  const passwordHash = bcrypt.hashSync(payload.password, salt);
 
-  res.json('Pinging signup')
-})
+  try {
+    await User.create({ email: payload.email, password: passwordHash });
+    res.status(201).json({ message: "User created" });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json(error);
+  }
+});
 
-router.post('/login', (req, res, next) => {
-  /* Get back the payload from your request, as it's a POST you can access req.body */
-
-  /* Try to get your user from the DB */
-
-  /* If your user exists, check if the password is correct */
-
-  /* If your password is correct, sign the JWT using jsonwebtoken */
-  const authToken = jwt.sign(
-    {
-      expiresIn: '6h',
-      user: null, // Put yhe data of your user in there
-    },
-    process.env.TOKEN_SECRET,
-    {
-      algorithm: 'HS256',
+/* POST route to login */
+router.post("/login", async (req, res) => {
+  const payload = req.body; // { email: 'someEmail', password '1234'}
+  /* Check if the user exists */
+  const potentialUser = await User.findOne({ email: payload.email });
+  if (potentialUser) {
+    const doPasswordsMatch = bcrypt.compareSync(payload.password, potentialUser.password);
+    /* Check if the password is correct */
+    if (doPasswordsMatch) {
+      /* Sign the JWT */
+      //this jwt.sign method is what actually creates the token for us.
+      const authToken = jwt.sign({ userId: potentialUser._id }, process.env.TOKEN_SECRET, {
+        algorithm: "HS256",
+        expiresIn: "6h",
+      });
+      // Sending back the token to the front and you can send more data if you want.
+      res.status(202).json({ token: authToken });
+    } else {
+      /* Incorrect password */
+      res.status(403).json({ errorMessage: "Password invalid" });
     }
-  )
+  } else {
+    /* No user found */
+    res.status(403).json({ errorMessage: "No user found" });
+  }
+});
 
-  res.json('Pinging login')
-})
+/* GET route to verify the token */
+router.get("/verify", isAuthenticated, async (req, res) => {
+  console.log("here is after the middleware, what JWT is giving us", req.auth);
+  const currentUser = await User.findById(req.auth.userId);
+  //never send the password, hashed or not to the front end
+  currentUser.password = "****";
+  res.status(200).json({ message: "Token is valid", currentUser });
+});
 
-router.get('/verify', (req, res, next) => {
-  // You need to use the middleware there, if the request passes the middleware, it means your token is good
-  res.json('Pinging verify')
-})
-
-module.exports = router
+module.exports = router;
